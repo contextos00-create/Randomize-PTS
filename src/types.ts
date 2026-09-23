@@ -11,6 +11,12 @@ export interface SelectOption {
   value: string;
 }
 
+export interface AttributeLink {
+  targetLayerId: string;
+  targetVarId: string;
+  multiplier?: number; // e.g., 1.0 (exact match), 0.5 (half), 2.0 (double)
+}
+
 export interface DynamicVariable {
   id: string;
   key: string;
@@ -27,6 +33,7 @@ export interface DynamicVariable {
   isLocked: boolean;
   description?: string;
   isCustom?: boolean;
+  linkedTo?: AttributeLink; // Tie attribute to another attribute in another layer
 }
 
 export type EngineType =
@@ -48,6 +55,14 @@ export interface CanvasLayer {
   randomizeEnabled: boolean; // whether randomize effects this layer
   isLocked: boolean; // whether layer is locked in
   createdAt: number;
+}
+
+export interface PtsCodeFile {
+  id: string;
+  name: string;
+  description: string;
+  code: string;
+  isDefault?: boolean;
 }
 
 export interface EnginePresetInfo {
@@ -82,4 +97,3 @@ export interface CustomCodeState {
   isEnabled: boolean;
   lastError: string | null;
 }
-

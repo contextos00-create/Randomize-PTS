@@ -11,6 +11,14 @@ import {
   ChevronDown,
   Code2,
   Bot,
+  Atom,
+  Waves,
+  Triangle,
+  Flame,
+  Globe,
+  Lock,
+  Unlock,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 import {
@@ -26,6 +34,7 @@ import {
   randomizeVariables,
   DEFAULT_PRESET_FAVORITES,
 } from '../engines/presets';
+import { syncLinkedVariables } from '../store/studioStore';
 import { VisualizationCanvas } from './VisualizationCanvas';
 import { RandomizePanel } from './RandomizePanel';
 import { LayersDrawer } from './LayersDrawer';
@@ -48,6 +57,15 @@ interface StudioWorkspaceProps {
   }) => void;
 }
 
+const ENGINE_ICONS: Record<EngineType | 'custom_code', React.ReactNode> = {
+  particle_swarm: <Atom className="w-4 h-4 text-cyan-600" />,
+  harmonic_mesh: <Waves className="w-4 h-4 text-indigo-600" />,
+  geometric_delaunay: <Triangle className="w-4 h-4 text-orange-600" />,
+  kinetic_ribbons: <Flame className="w-4 h-4 text-rose-600" />,
+  cosmic_attractor: <Globe className="w-4 h-4 text-violet-600" />,
+  custom_code: <Code2 className="w-4 h-4 text-amber-600" />,
+};
+
 export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   initialEngine,
   initialTab,
@@ -57,7 +75,8 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
 }) => {
   // Layers State: Multi-layer composition
   const [layers, setLayers] = useState<CanvasLayer[]>(() => {
-    const engineToUse = initialEngine && initialEngine !== 'custom_code' ? initialEngine : 'particle_swarm';
+    const engineToUse =
+      initialEngine && initialEngine !== 'custom_code' ? initialEngine : 'particle_swarm';
     return [
       {
         id: 'layer-1',
@@ -86,36 +105,10 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
     return activeLayer ? activeLayer.variables : [];
   }, [activeLayer]);
 
-  // Code editor state for custom code execution
+  // Code editor state
   const [activeCode, setActiveCode] = useState<string>(
     activeLayer?.customCode ||
-      `// Pts.js Custom Canvas Function
-// Accessible objects: form, space, time, v, pointer, isMouseDown, Pt, Group, Curve, Geom, Circle, Triangle, Polygon
-
-function render(form, space, time, v, pointer, isMouseDown) {
-  const center = space.center;
-  const numRings = Math.round(v.numRings || 6);
-  const baseRadius = v.baseRadius || 60;
-  const spiralTwist = v.spiralTwist || 2.4;
-  const primaryColor = v.primaryColor || '#00f0ff';
-  const secondaryColor = v.secondaryColor || '#ff0077';
-  
-  for (let i = 1; i <= numRings; i++) {
-    const r = baseRadius * i * 0.4 + Math.sin(time * 2 + i) * 12;
-    const count = 12 + i * 4;
-    const pts = [];
-    
-    for (let j = 0; j < count; j++) {
-      const angle = (j / count) * Math.PI * 2 + (i % 2 === 0 ? time : -time) * (spiralTwist * 0.2);
-      const px = center.x + Math.cos(angle) * r;
-      const py = center.y + Math.sin(angle) * r;
-      pts.push(new Pt(px, py));
-    }
-    
-    const curve = Curve.catmullRom(Group.fromArray(pts), 4);
-    form.stroke(i % 2 === 0 ? primaryColor : secondaryColor, 2).line(curve);
-  }
-}`
+      `// Pts.js Custom Canvas Function\nfunction render(form, space, time, v, pointer) {\n  const center = space.center;\n  const r = (v.radius || 60) + Math.sin(time * 2) * 10;\n  form.stroke("#00f0ff", 2).circle(Circle.fromCenter(center, r));\n}`
   );
   const [executionError, setExecutionError] = useState<string | null>(null);
 
@@ -123,7 +116,7 @@ function render(form, space, time, v, pointer, isMouseDown) {
   const [isCodeDrawerOpen, setIsCodeDrawerOpen] = useState(initialDrawer === 'code');
   const [isLayersDrawerOpen, setIsLayersDrawerOpen] = useState(initialDrawer === 'layers');
 
-  // Randomize intensity setting
+  // Randomize intensity (Variance Selector)
   const [intensity, setIntensity] = useState<RandomizeIntensity>(initialIntensity || 'balanced');
   const [isRandomizing, setIsRandomizing] = useState<boolean>(false);
 
@@ -140,7 +133,7 @@ function render(form, space, time, v, pointer, isMouseDown) {
   const [addVarCategory, setAddVarCategory] = useState<ParameterCategory>('physics');
   const [isAiHelpOpen, setIsAiHelpOpen] = useState(false);
 
-  // Saved Favorites in LocalStorage
+  // Saved Favorites
   const [favorites, setFavorites] = useState<SavedConfiguration[]>(() => {
     try {
       const stored = localStorage.getItem('pts_randomizer_favorites');
@@ -156,7 +149,6 @@ function render(form, space, time, v, pointer, isMouseDown) {
     }));
   });
 
-  // Save favorites to LocalStorage whenever updated
   useEffect(() => {
     try {
       localStorage.setItem('pts_randomizer_favorites', JSON.stringify(favorites));
@@ -176,48 +168,6 @@ function render(form, space, time, v, pointer, isMouseDown) {
     },
     []
   );
-
-  // Check if pending favorite was loaded from /favorites route
-  useEffect(() => {
-    try {
-      const pending = sessionStorage.getItem('pts_pending_load_favorite');
-      if (pending) {
-        sessionStorage.removeItem('pts_pending_load_favorite');
-        const config: SavedConfiguration = JSON.parse(pending);
-        if (config && config.variables) {
-          setLayers([
-            {
-              id: 'layer-1',
-              name: config.name,
-              engine: config.engine,
-              variables: JSON.parse(JSON.stringify(config.variables)),
-              isVisible: true,
-              opacity: 1.0,
-              blendMode: 'source-over',
-              randomizeEnabled: true,
-              isLocked: false,
-              createdAt: Date.now(),
-            },
-          ]);
-          setActiveLayerId('layer-1');
-          showToast(`Loaded favorite "${config.name}"`, 'success');
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }, [showToast]);
-
-  // Handle engine change from URL search param
-  useEffect(() => {
-    if (initialEngine && activeLayer && activeLayer.engine !== initialEngine) {
-      if (initialEngine === 'custom_code') {
-        handleEngineChange('custom_code');
-      } else if (ENGINE_PRESETS[initialEngine]) {
-        handleEngineChange(initialEngine);
-      }
-    }
-  }, [initialEngine]);
 
   // Mobile view tab toggle: 'preview' or 'controls'
   const [mobileTab, setMobileTab] = useState<'preview' | 'controls'>('preview');
@@ -239,7 +189,7 @@ function render(form, space, time, v, pointer, isMouseDown) {
       );
       setIsCodeDrawerOpen(true);
       onUpdateSearch?.({ engine: 'custom_code', drawer: 'code' });
-      showToast('Switched layer to Custom Pts.js Code mode', 'info');
+      showToast('Switched active layer to Custom Pts.js Code', 'info');
       return;
     }
 
@@ -259,27 +209,33 @@ function render(form, space, time, v, pointer, isMouseDown) {
     showToast(`Switched active layer to ${ENGINE_PRESETS[newEngine].name}`, 'info');
   };
 
-  // Variable updater for active layer
+  // Variable updater for active layer with attribute linking propagation
   const handleUpdateVariable = useCallback(
     (id: string, updates: Partial<DynamicVariable>) => {
       if (activeLayer?.isLocked) {
         showToast('Active layer is locked in', 'amber');
         return;
       }
-      setLayers((prev) =>
-        prev.map((l) => {
+      setLayers((prev) => {
+        const updatedLayers = prev.map((l) => {
           if (l.id !== activeLayerId) return l;
           return {
             ...l,
             variables: l.variables.map((v) => (v.id === id ? { ...v, ...updates } : v)),
           };
-        })
-      );
+        });
+
+        // Propagate linked attribute values to any other layers tied to this variable
+        if (updates.value !== undefined) {
+          return syncLinkedVariables(updatedLayers, activeLayerId, id, updates.value);
+        }
+        return updatedLayers;
+      });
     },
     [activeLayer, activeLayerId, showToast]
   );
 
-  // Master Randomize: Only affects layers where randomizeEnabled === true AND isLocked === false!
+  // Master Randomize: Randomizes unlocked variables and synchronizes tied attributes
   const handleRandomizeAll = useCallback(() => {
     setIsRandomizing(true);
     setTimeout(() => {
@@ -288,7 +244,8 @@ function render(form, space, time, v, pointer, isMouseDown) {
       let skippedLayersCount = 0;
 
       setLayers((prevLayers) => {
-        return prevLayers.map((layer) => {
+        // Step 1: Randomize eligible layers
+        const randomizedLayers = prevLayers.map((layer) => {
           if (!layer.randomizeEnabled || layer.isLocked) {
             skippedLayersCount++;
             return layer;
@@ -302,13 +259,35 @@ function render(form, space, time, v, pointer, isMouseDown) {
             variables: updated,
           };
         });
+
+        // Step 2: Synchronize all tied attributes across layers
+        return randomizedLayers.map((layer) => {
+          const syncedVars = layer.variables.map((v) => {
+            if (v.linkedTo) {
+              const driverLayer = randomizedLayers.find((dl) => dl.id === v.linkedTo?.targetLayerId);
+              const driverVar = driverLayer?.variables.find((dv) => dv.id === v.linkedTo?.targetVarId);
+              if (driverVar) {
+                let syncedVal = driverVar.value;
+                if (typeof syncedVal === 'number') {
+                  const mult = v.linkedTo.multiplier ?? 1.0;
+                  syncedVal = Number((syncedVal * mult).toFixed(2));
+                  if (v.min !== undefined) syncedVal = Math.max(v.min, syncedVal);
+                  if (v.max !== undefined) syncedVal = Math.min(v.max, syncedVal);
+                }
+                return { ...v, value: syncedVal };
+              }
+            }
+            return v;
+          });
+          return { ...layer, variables: syncedVars };
+        });
       });
 
       if (totalChangedCount > 0) {
         showToast(
           `Randomized ${totalChangedCount} variables across ${affectedLayersCount} active layer${
             affectedLayersCount === 1 ? '' : 's'
-          }${skippedLayersCount > 0 ? ` (${skippedLayersCount} protected/locked)` : ''}`,
+          }${skippedLayersCount > 0 ? ` (${skippedLayersCount} locked/protected)` : ''}`,
           'success'
         );
       } else {
@@ -431,72 +410,10 @@ function render(form, space, time, v, pointer, isMouseDown) {
         ? `Layer ${layers.length + 1} (Code)`
         : `Layer ${layers.length + 1} (${ENGINE_PRESETS[engine]?.name.split(' ')[0]})`);
 
-    let initialVars: DynamicVariable[] = [];
-    if (engine !== 'custom_code') {
-      initialVars = JSON.parse(JSON.stringify(ENGINE_PRESETS[engine].defaultVariables));
-    } else {
-      initialVars = [
-        {
-          id: `var-${Date.now()}-1`,
-          name: 'Num Rings',
-          key: 'numRings',
-          category: 'function',
-          type: 'number',
-          value: 6,
-          defaultValue: 6,
-          min: 1,
-          max: 16,
-          step: 1,
-          isLocked: false,
-        },
-        {
-          id: `var-${Date.now()}-2`,
-          name: 'Base Radius',
-          key: 'baseRadius',
-          category: 'physics',
-          type: 'number',
-          value: 60,
-          defaultValue: 60,
-          min: 20,
-          max: 180,
-          step: 1,
-          isLocked: false,
-        },
-        {
-          id: `var-${Date.now()}-3`,
-          name: 'Spiral Twist',
-          key: 'spiralTwist',
-          category: 'behavior',
-          type: 'number',
-          value: 2.4,
-          defaultValue: 2.4,
-          min: 0.1,
-          max: 6.0,
-          step: 0.1,
-          isLocked: false,
-        },
-        {
-          id: `var-${Date.now()}-4`,
-          name: 'Primary Color',
-          key: 'primaryColor',
-          category: 'look',
-          type: 'color',
-          value: '#00f0ff',
-          defaultValue: '#00f0ff',
-          isLocked: false,
-        },
-        {
-          id: `var-${Date.now()}-5`,
-          name: 'Secondary Color',
-          key: 'secondaryColor',
-          category: 'look',
-          type: 'color',
-          value: '#ff0077',
-          defaultValue: '#ff0077',
-          isLocked: false,
-        },
-      ];
-    }
+    const initialVars =
+      engine !== 'custom_code'
+        ? JSON.parse(JSON.stringify(ENGINE_PRESETS[engine].defaultVariables))
+        : JSON.parse(JSON.stringify(ENGINE_PRESETS.particle_swarm.defaultVariables));
 
     const newLayer: CanvasLayer = {
       id: newId,
@@ -598,94 +515,8 @@ function render(form, space, time, v, pointer, isMouseDown) {
       );
     }
     setExecutionError(null);
-    showToast('Applied Pts.js custom code to layer', 'success');
+    showToast('Applied Pts.js code to active layer', 'success');
   };
-
-  // Save Current Active Layer as Favorite
-  const handleSaveCurrentFavorite = useCallback(
-    (name: string, notes?: string) => {
-      if (!activeLayer) return;
-      const currentVarsMap: Record<string, any> = {};
-      activeLayer.variables.forEach((v) => {
-        currentVarsMap[v.key] = v.value;
-      });
-
-      const previewPalette = [
-        currentVarsMap.primaryColor || '#00f0ff',
-        currentVarsMap.secondaryColor || '#ff0077',
-        currentVarsMap.bgColor || '#090a0f',
-      ];
-
-      const newFavorite: SavedConfiguration = {
-        id: `fav-${Date.now()}`,
-        name,
-        createdAt: Date.now(),
-        engine: activeLayer.engine === 'custom_code' ? 'particle_swarm' : activeLayer.engine,
-        variables: JSON.parse(JSON.stringify(activeLayer.variables)),
-        previewPalette,
-        tags: [activeLayer.name.split(' ')[0]],
-        notes,
-      };
-
-      setFavorites((prev) => [newFavorite, ...prev]);
-      showToast(`Saved favorite: "${name}"`, 'success');
-    },
-    [activeLayer, showToast]
-  );
-
-  // Load a Saved Favorite
-  const handleLoadFavorite = useCallback(
-    (config: SavedConfiguration) => {
-      if (activeLayer) {
-        setLayers((prev) =>
-          prev.map((l) => {
-            if (l.id !== activeLayerId) return l;
-            return {
-              ...l,
-              engine: config.engine,
-              variables: JSON.parse(JSON.stringify(config.variables)),
-              name: config.name,
-            };
-          })
-        );
-      }
-      showToast(`Loaded favorite "${config.name}" into active layer`, 'success');
-    },
-    [activeLayer, activeLayerId, showToast]
-  );
-
-  // Delete a Favorite
-  const handleDeleteFavorite = useCallback(
-    (id: string) => {
-      setFavorites((prev) => prev.filter((f) => f.id !== id));
-      showToast('Deleted favorite configuration', 'info');
-    },
-    [showToast]
-  );
-
-  // Import project configuration
-  const handleImportConfig = useCallback(
-    (data: { engine: EngineType; variables: DynamicVariable[]; name?: string }) => {
-      if (activeLayer) {
-        setLayers((prev) =>
-          prev.map((l) => {
-            if (l.id !== activeLayerId) return l;
-            return {
-              ...l,
-              engine: data.engine,
-              variables: JSON.parse(JSON.stringify(data.variables)),
-              name: data.name || `${ENGINE_PRESETS[data.engine]?.name} Layer`,
-            };
-          })
-        );
-      }
-      showToast(
-        `Successfully imported project${data.name ? ` "${data.name}"` : ''}!`,
-        'success'
-      );
-    },
-    [activeLayer, activeLayerId, showToast]
-  );
 
   // Keyboard Shortcuts Listener (Space / R for randomize)
   useEffect(() => {
@@ -711,45 +542,98 @@ function render(form, space, time, v, pointer, isMouseDown) {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
-      {/* Studio Sub-Header: Engine switcher & quick actions */}
-      <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 border-b border-zinc-200/80 z-10 shrink-0">
+      {/* Top Header Bar: Prominent Module Switcher, Variance Selector, Randomized Parameters Bar, Layers in Right Corner */}
+      <div className="px-4 py-2.5 bg-white/95 border-b border-zinc-200/90 z-10 shrink-0 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+        {/* Left: Prominent Module View Switcher */}
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <select
-              id="select-visualization-engine"
-              value={activeLayer?.engine || 'particle_swarm'}
-              onChange={(e) =>
-                handleEngineChange(e.target.value as EngineType | 'custom_code')
-              }
-              className="appearance-none pl-3 pr-8 py-1.5 rounded-lg bg-white hover:bg-zinc-50 border border-zinc-300 text-xs font-semibold text-zinc-900 cursor-pointer focus:outline-hidden focus:border-zinc-500 transition-colors shadow-2xs"
-            >
-              {(Object.values(ENGINE_PRESETS) as any[]).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-              <option value="custom_code">Custom Pts.js Code</option>
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div className="flex items-center gap-2 p-1.5 pl-2.5 pr-2 bg-zinc-100/90 hover:bg-zinc-200/80 rounded-xl border border-zinc-250 transition-all shadow-2xs">
+            <span className="shrink-0">
+              {ENGINE_ICONS[activeLayer?.engine || 'particle_swarm']}
+            </span>
+            <div className="flex flex-col">
+              <span className="text-4xs font-mono font-bold uppercase tracking-wider text-zinc-400 leading-none">
+                MODULE / ENGINE
+              </span>
+              <div className="relative">
+                <select
+                  id="select-visualization-engine"
+                  value={activeLayer?.engine || 'particle_swarm'}
+                  onChange={(e) =>
+                    handleEngineChange(e.target.value as EngineType | 'custom_code')
+                  }
+                  className="appearance-none bg-transparent pr-6 py-0.5 text-xs font-bold text-zinc-900 cursor-pointer focus:outline-hidden"
+                >
+                  {(Object.values(ENGINE_PRESETS) as any[]).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                  <option value="custom_code">Custom Pts.js Code Kernel</option>
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-400 absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
           </div>
 
-          <span className="text-3xs text-zinc-500 font-mono hidden sm:inline">
-            Active: <strong className="text-zinc-800">{activeLayer?.name}</strong>
-          </span>
+          {/* Active Layer Pill */}
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-zinc-50 border border-zinc-200 text-3xs font-mono">
+            <span className="w-2 h-2 rounded-full bg-zinc-900"></span>
+            <span className="text-zinc-500 font-semibold">Active Layer:</span>
+            <strong className="text-zinc-900 truncate max-w-[120px]">
+              {activeLayer?.name}
+            </strong>
+            {activeLayer?.isLocked && (
+              <span className="px-1 py-0.2 rounded text-4xs bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5">
+                <Lock className="w-2.5 h-2.5" />
+                <span>Locked</span>
+              </span>
+            )}
+          </div>
         </div>
 
+        {/* Center: Variance Selector + Master Randomize Parameters Bar */}
         <div className="flex items-center gap-2">
-          {/* AI Help Button */}
-          <button
-            id="btn-ai-help"
-            onClick={() => setIsAiHelpOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-black text-white text-xs font-medium transition-all shadow-xs"
-            title="Ask AI to craft custom Pts.js code and dynamic parameters"
-          >
-            <Bot className="w-3.5 h-3.5 text-zinc-300" />
-            <span>AI Help</span>
-          </button>
+          {/* Variance Selector (Gentle, Balanced, Wild) */}
+          <div className="flex items-center gap-1 bg-zinc-100 p-1 rounded-xl border border-zinc-250">
+            <span className="text-4xs font-mono font-bold uppercase text-zinc-400 px-1.5 hidden sm:inline">
+              Variance:
+            </span>
+            {(['gentle', 'balanced', 'wild'] as RandomizeIntensity[]).map((lvl) => (
+              <button
+                key={lvl}
+                onClick={() => {
+                  setIntensity(lvl);
+                  onUpdateSearch?.({ intensity: lvl });
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold capitalize transition-all ${
+                  intensity === lvl
+                    ? 'bg-white text-zinc-900 shadow-2xs font-extrabold ring-1 ring-zinc-300'
+                    : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/60'
+                }`}
+              >
+                {lvl}
+              </button>
+            ))}
+          </div>
 
+          {/* Master Randomized Parameters Bar Button */}
+          <button
+            id="btn-master-randomize-header"
+            onClick={handleRandomizeAll}
+            disabled={isRandomizing}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-bold tracking-wide transition-all shadow-md hover:scale-[1.02] active:scale-[0.98]"
+            title="Randomize unlocked parameters across all active layers (Shortcut: Space or R)"
+          >
+            <Dice5 className={`w-4 h-4 ${isRandomizing ? 'animate-spin' : ''}`} />
+            <span>Randomize Parameters</span>
+            <span className="hidden md:inline px-1.5 py-0.2 rounded bg-white/20 text-white text-4xs font-mono">
+              Space / R
+            </span>
+          </button>
+        </div>
+
+        {/* Right Corner: Code Drawer Toggle & Prominent Layers Button in Right Corner */}
+        <div className="flex items-center gap-2">
           {/* Code Drawer Toggle */}
           <button
             id="btn-open-code-drawer"
@@ -758,18 +642,29 @@ function render(form, space, time, v, pointer, isMouseDown) {
               setIsCodeDrawerOpen(next);
               onUpdateSearch?.({ drawer: next ? 'code' : 'none' });
             }}
-            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors shadow-2xs ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all shadow-2xs ${
               isCodeDrawerOpen
-                ? 'bg-zinc-900 text-white border-zinc-900'
+                ? 'bg-violet-600 text-white border-violet-600 shadow-violet-500/20'
                 : 'bg-white hover:bg-zinc-50 text-zinc-700 border-zinc-250'
             }`}
-            title="Toggle Pts.js Code Drawer"
+            title="Toggle Pts.js Code Drawer with .tsx files"
           >
             <Code2 className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Code Drawer</span>
+            <span className="hidden sm:inline">PTS Code</span>
           </button>
 
-          {/* Layers Drawer Toggle */}
+          {/* AI Help */}
+          <button
+            id="btn-ai-help"
+            onClick={() => setIsAiHelpOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-zinc-50 border border-zinc-250 text-zinc-800 text-xs font-semibold transition-all shadow-2xs"
+            title="AI Pts.js mathematical generator"
+          >
+            <Bot className="w-3.5 h-3.5 text-zinc-600" />
+            <span className="hidden xl:inline">AI Help</span>
+          </button>
+
+          {/* Layers Button in Far Right Corner */}
           <button
             id="btn-open-layers-drawer"
             onClick={() => {
@@ -777,49 +672,27 @@ function render(form, space, time, v, pointer, isMouseDown) {
               setIsLayersDrawerOpen(next);
               onUpdateSearch?.({ drawer: next ? 'layers' : 'none' });
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors shadow-2xs ${
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-xs ${
               isLayersDrawerOpen
                 ? 'bg-zinc-900 text-white border-zinc-900'
-                : 'bg-white hover:bg-zinc-50 text-zinc-700 border-zinc-250'
+                : 'bg-zinc-900 hover:bg-black text-white border-zinc-900'
             }`}
-            title="Toggle Layers slide-out Drawer"
+            title="Toggle multi-layer slide-out drawer in right corner"
           >
-            <Layers className="w-3.5 h-3.5 text-zinc-700" />
+            <Layers className="w-4 h-4 text-zinc-200" />
             <span>Layers</span>
-            <span className="px-1.5 py-0.2 rounded-full text-4xs font-mono bg-zinc-100 text-zinc-700 border border-zinc-200">
+            <span className="px-1.5 py-0.2 rounded-full text-3xs font-mono bg-white/20 text-white">
               {layers.length}
             </span>
-          </button>
-
-          {/* Import Button */}
-          <button
-            id="btn-open-import"
-            onClick={() => setExportImportModal({ isOpen: true, tab: 'import' })}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white hover:bg-zinc-50 border border-zinc-250 text-zinc-700 hover:text-zinc-900 text-xs font-medium transition-colors shadow-2xs"
-            title="Import project (.json)"
-          >
-            <Upload className="w-3.5 h-3.5 text-zinc-500" />
-            <span className="hidden sm:inline">Import</span>
-          </button>
-
-          {/* Export Button */}
-          <button
-            id="btn-open-export"
-            onClick={() => setExportImportModal({ isOpen: true, tab: 'export' })}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-black text-white text-xs font-semibold transition-colors shadow-xs"
-            title="Export project to JSON, PNG, SVG, or standalone HTML"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export</span>
           </button>
         </div>
       </div>
 
-      {/* Mobile Tab Toggle Bar */}
+      {/* Mobile Tab Bar */}
       <div className="lg:hidden flex items-center justify-around border-b border-zinc-200 bg-white p-1">
         <button
           onClick={() => setMobileTab('preview')}
-          className={`flex-1 py-1.5 text-xs font-medium rounded-lg text-center transition-all ${
+          className={`flex-1 py-1.5 text-xs font-bold rounded-lg text-center transition-all ${
             mobileTab === 'preview'
               ? 'bg-zinc-900 text-white shadow-xs'
               : 'text-zinc-600 hover:text-zinc-900'
@@ -830,20 +703,20 @@ function render(form, space, time, v, pointer, isMouseDown) {
         </button>
         <button
           onClick={() => setMobileTab('controls')}
-          className={`flex-1 py-1.5 text-xs font-medium rounded-lg text-center transition-all ${
+          className={`flex-1 py-1.5 text-xs font-bold rounded-lg text-center transition-all ${
             mobileTab === 'controls'
               ? 'bg-zinc-900 text-white shadow-xs'
               : 'text-zinc-600 hover:text-zinc-900'
           }`}
         >
           <Sliders className="w-3.5 h-3.5 inline mr-1" />
-          Variables ({activeVariables.length})
+          Sliders ({activeVariables.length})
         </button>
       </div>
 
       {/* Main Studio Split Layout */}
       <main className="flex-1 flex overflow-hidden p-2 sm:p-3 gap-3">
-        {/* Left Section: Live Interactive Visualization Preview with Inside Drawers */}
+        {/* Left Section: Live Visualization Preview */}
         <section
           id="preview-section"
           className={`h-full flex-col transition-all duration-300 relative ${
@@ -905,20 +778,21 @@ function render(form, space, time, v, pointer, isMouseDown) {
           </VisualizationCanvas>
         </section>
 
-        {/* Right Section: Randomize Section with Dynamic Variables & Locking Controls */}
+        {/* Right Section: Expanded Tabbed Parameter Sliders with Color-coded Tabs & Coral Orange Button */}
         <aside
           id="randomize-section"
           className={`h-full flex-col transition-all duration-300 ${
             mobileTab === 'controls'
               ? 'flex flex-1'
-              : 'hidden lg:flex w-[420px] xl:w-[480px] shrink-0'
+              : 'hidden lg:flex w-[440px] xl:w-[500px] shrink-0'
           }`}
           style={{ minWidth: 0 }}
         >
           <RandomizePanel
             variables={activeVariables}
+            allLayers={layers}
+            activeLayerId={activeLayerId}
             onUpdateVariable={handleUpdateVariable}
-            onRandomizeAll={handleRandomizeAll}
             onRandomizeCategory={handleRandomizeCategory}
             onLockAll={handleLockAll}
             onInvertLocks={handleInvertLocks}
@@ -928,16 +802,9 @@ function render(form, space, time, v, pointer, isMouseDown) {
             }}
             onRemoveVariable={handleRemoveDynamicVariable}
             intensity={intensity}
-            onChangeIntensity={(newIntensity) => {
-              setIntensity(newIntensity);
-              onUpdateSearch?.({ intensity: newIntensity });
-            }}
-            isRandomizing={isRandomizing}
             activeLayerName={activeLayer?.name || 'Active Layer'}
             activeLayerIsLocked={activeLayer?.isLocked || false}
             activeLayerRandomizeEnabled={activeLayer?.randomizeEnabled !== false}
-            totalLayersCount={layers.length}
-            onOpenLayersDrawer={() => setIsLayersDrawerOpen(true)}
           />
         </aside>
       </main>
@@ -947,10 +814,47 @@ function render(form, space, time, v, pointer, isMouseDown) {
         isOpen={isFavoritesOpen}
         onClose={() => setIsFavoritesOpen(false)}
         favorites={favorites}
-        onLoadFavorite={handleLoadFavorite}
-        onSaveCurrentAsFavorite={handleSaveCurrentFavorite}
-        onDeleteFavorite={handleDeleteFavorite}
-        currentEngine={activeLayer?.engine === 'custom_code' ? 'particle_swarm' : (activeLayer?.engine || 'particle_swarm')}
+        onLoadFavorite={(config) => {
+          if (activeLayer) {
+            setLayers((prev) =>
+              prev.map((l) => {
+                if (l.id !== activeLayerId) return l;
+                return {
+                  ...l,
+                  engine: config.engine,
+                  variables: JSON.parse(JSON.stringify(config.variables)),
+                  name: config.name,
+                };
+              })
+            );
+          }
+          showToast(`Loaded favorite "${config.name}"`, 'success');
+        }}
+        onSaveCurrentAsFavorite={(name, notes) => {
+          if (!activeLayer) return;
+          const newFav: SavedConfiguration = {
+            id: `fav-${Date.now()}`,
+            name,
+            createdAt: Date.now(),
+            engine:
+              activeLayer.engine === 'custom_code' ? 'particle_swarm' : activeLayer.engine,
+            variables: JSON.parse(JSON.stringify(activeLayer.variables)),
+            previewPalette: ['#00f0ff', '#ff0077', '#090a0f'],
+            tags: [activeLayer.name.split(' ')[0]],
+            notes,
+          };
+          setFavorites((prev) => [newFav, ...prev]);
+          showToast(`Saved favorite: "${name}"`, 'success');
+        }}
+        onDeleteFavorite={(id) => {
+          setFavorites((prev) => prev.filter((f) => f.id !== id));
+          showToast('Deleted favorite configuration', 'info');
+        }}
+        currentEngine={
+          activeLayer?.engine === 'custom_code'
+            ? 'particle_swarm'
+            : activeLayer?.engine || 'particle_swarm'
+        }
         currentVariables={activeVariables}
       />
 
@@ -959,12 +863,31 @@ function render(form, space, time, v, pointer, isMouseDown) {
         isOpen={exportImportModal.isOpen}
         onClose={() => setExportImportModal({ isOpen: false, tab: 'export' })}
         activeTab={exportImportModal.tab}
-        engine={activeLayer?.engine === 'custom_code' ? 'particle_swarm' : (activeLayer?.engine || 'particle_swarm')}
+        engine={
+          activeLayer?.engine === 'custom_code'
+            ? 'particle_swarm'
+            : activeLayer?.engine || 'particle_swarm'
+        }
         variables={activeVariables}
-        onImportConfig={handleImportConfig}
+        onImportConfig={(data) => {
+          if (activeLayer) {
+            setLayers((prev) =>
+              prev.map((l) => {
+                if (l.id !== activeLayerId) return l;
+                return {
+                  ...l,
+                  engine: data.engine,
+                  variables: JSON.parse(JSON.stringify(data.variables)),
+                  name: data.name || `${ENGINE_PRESETS[data.engine]?.name} Layer`,
+                };
+              })
+            );
+          }
+          showToast(`Imported project "${data.name || ''}"`, 'success');
+        }}
       />
 
-      {/* Add Custom Dynamic Variable Modal */}
+      {/* Add Custom Variable Modal */}
       <AddVariableModal
         isOpen={isAddVariableOpen}
         onClose={() => setIsAddVariableOpen(false)}
@@ -972,12 +895,16 @@ function render(form, space, time, v, pointer, isMouseDown) {
         initialCategory={addVarCategory}
       />
 
-      {/* AI Assistance Modal */}
+      {/* AI Help Modal */}
       <AiHelpModal
         isOpen={isAiHelpOpen}
         onClose={() => setIsAiHelpOpen(false)}
         currentCode={activeCode}
-        engine={activeLayer?.engine === 'custom_code' ? 'particle_swarm' : (activeLayer?.engine || 'particle_swarm')}
+        engine={
+          activeLayer?.engine === 'custom_code'
+            ? 'particle_swarm'
+            : activeLayer?.engine || 'particle_swarm'
+        }
         variables={activeVariables}
         onApplyCode={(code, newVars) => {
           setActiveCode(code);
@@ -1000,7 +927,7 @@ function render(form, space, time, v, pointer, isMouseDown) {
         }}
       />
 
-      {/* Global Interactive Notification Toast */}
+      {/* Toast Notification */}
       {toast && (
         <div
           id="app-toast-notification"

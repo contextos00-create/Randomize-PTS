@@ -1,14 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Dice5,
   Lock,
   Unlock,
-  Sliders,
-  RotateCcw,
   Plus,
-  Search,
   Sparkles,
-  Layers,
   Activity,
   Binary,
   Palette,
@@ -17,93 +12,137 @@ import {
   Check,
   Columns2,
   Rows3,
-  SlidersHorizontal,
-  ChevronRight,
+  Link2,
+  Unlink,
+  ExternalLink,
+  ChevronDown,
+  X,
+  Dice5,
 } from 'lucide-react';
-import { DynamicVariable, ParameterCategory, RandomizeIntensity } from '../types';
+import {
+  DynamicVariable,
+  ParameterCategory,
+  RandomizeIntensity,
+  CanvasLayer,
+  AttributeLink,
+} from '../types';
 import { randomizeSingleValue } from '../engines/presets';
 
 interface RandomizePanelProps {
   variables: DynamicVariable[];
+  allLayers?: CanvasLayer[];
+  activeLayerId?: string;
   onUpdateVariable: (id: string, updates: Partial<DynamicVariable>) => void;
-  onRandomizeAll: () => void;
   onRandomizeCategory: (category: ParameterCategory) => void;
   onLockAll: (locked: boolean) => void;
   onInvertLocks: () => void;
   onAddVariableClick: (category?: ParameterCategory) => void;
   onRemoveVariable: (id: string) => void;
   intensity: RandomizeIntensity;
-  onChangeIntensity: (intensity: RandomizeIntensity) => void;
-  isRandomizing?: boolean;
   activeLayerName?: string;
   activeLayerIsLocked?: boolean;
   activeLayerRandomizeEnabled?: boolean;
-  totalLayersCount?: number;
-  onOpenLayersDrawer?: () => void;
 }
 
 type TabCategory = 'physics' | 'function' | 'look' | 'behavior' | 'all';
 
 const TAB_CONFIG: Record<
   'physics' | 'function' | 'look' | 'behavior',
-  { label: string; icon: React.ComponentType<{ className?: string }>; color: string; dot: string }
+  {
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    bgActive: string;
+    textActive: string;
+    borderActive: string;
+    badgeBg: string;
+    badgeText: string;
+    dot: string;
+  }
 > = {
   physics: {
     label: 'Physics',
     icon: Activity,
-    color: 'text-sky-600',
+    bgActive: 'bg-sky-500 text-white shadow-md shadow-sky-500/20',
+    textActive: 'text-sky-700',
+    borderActive: 'border-sky-500',
+    badgeBg: 'bg-sky-100',
+    badgeText: 'text-sky-800',
     dot: 'bg-sky-500',
   },
   function: {
     label: 'Function',
     icon: Binary,
-    color: 'text-violet-600',
+    bgActive: 'bg-violet-600 text-white shadow-md shadow-violet-600/20',
+    textActive: 'text-violet-700',
+    borderActive: 'border-violet-500',
+    badgeBg: 'bg-violet-100',
+    badgeText: 'text-violet-800',
     dot: 'bg-violet-500',
   },
   look: {
     label: 'Look',
     icon: Palette,
-    color: 'text-rose-600',
+    bgActive: 'bg-rose-500 text-white shadow-md shadow-rose-500/20',
+    textActive: 'text-rose-700',
+    borderActive: 'border-rose-500',
+    badgeBg: 'bg-rose-100',
+    badgeText: 'text-rose-800',
     dot: 'bg-rose-500',
   },
   behavior: {
     label: 'Behavior',
     icon: Atom,
-    color: 'text-emerald-600',
+    bgActive: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20',
+    textActive: 'text-emerald-700',
+    borderActive: 'border-emerald-500',
+    badgeBg: 'bg-emerald-100',
+    badgeText: 'text-emerald-800',
     dot: 'bg-emerald-500',
   },
 };
 
 export const RandomizePanel: React.FC<RandomizePanelProps> = ({
   variables,
+  allLayers = [],
+  activeLayerId = '',
   onUpdateVariable,
-  onRandomizeAll,
   onRandomizeCategory,
   onLockAll,
   onInvertLocks,
   onAddVariableClick,
   onRemoveVariable,
   intensity,
-  onChangeIntensity,
-  isRandomizing = false,
   activeLayerName = 'Active Layer',
   activeLayerIsLocked = false,
   activeLayerRandomizeEnabled = true,
-  totalLayersCount = 1,
-  onOpenLayersDrawer,
 }) => {
-  // Start on 'physics' to minimize scrolling immediately
+  // Start on 'physics' tab
   const [activeTab, setActiveTab] = useState<TabCategory>('physics');
-  const [searchQuery, setSearchQuery] = useState('');
   const [showLockedOnly, setShowLockedOnly] = useState(false);
   const [isTwoColumn, setIsTwoColumn] = useState(true);
 
+  // Modal / popover state for tying attributes to other layers
+  const [linkingVar, setLinkingVar] = useState<DynamicVariable | null>(null);
+  const [selectedTargetLayerId, setSelectedTargetLayerId] = useState<string>('');
+  const [selectedTargetVarId, setSelectedTargetVarId] = useState<string>('');
+  const [linkMultiplier, setLinkMultiplier] = useState<number>(1.0);
+
+  // Available other layers to tie to
+  const otherLayers = useMemo(() => {
+    return allLayers.filter((l) => l.id !== activeLayerId);
+  }, [allLayers, activeLayerId]);
+
+  // Variables available in selected target layer
+  const targetLayerVars = useMemo(() => {
+    const layer = allLayers.find((l) => l.id === selectedTargetLayerId);
+    return layer ? layer.variables : [];
+  }, [allLayers, selectedTargetLayerId]);
+
   // Statistics
   const lockedCount = useMemo(() => variables.filter((v) => v.isLocked).length, [variables]);
-  const unlockedCount = variables.length - lockedCount;
   const isMaxReached = variables.length >= 20;
 
-  // Filter variables matching tab & search
+  // Filter variables matching tab
   const filteredVariables = useMemo(() => {
     return variables.filter((v) => {
       if (activeTab !== 'all') {
@@ -113,23 +152,14 @@ export const RandomizePanel: React.FC<RandomizePanelProps> = ({
           return false;
         }
       }
-
       if (showLockedOnly && !v.isLocked) return false;
-
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchesName = v.name.toLowerCase().includes(q);
-        const matchesKey = v.key.toLowerCase().includes(q);
-        const matchesDesc = v.description?.toLowerCase().includes(q);
-        if (!matchesName && !matchesKey && !matchesDesc) return false;
-      }
       return true;
     });
-  }, [variables, activeTab, showLockedOnly, searchQuery]);
+  }, [variables, activeTab, showLockedOnly]);
 
   // Handle single variable randomize
   const handleRandomizeSingle = (v: DynamicVariable) => {
-    if (v.isLocked || activeLayerIsLocked) return;
+    if (v.isLocked || activeLayerIsLocked || v.linkedTo) return;
     const newVal = randomizeSingleValue(v, intensity);
     onUpdateVariable(v.id, { value: newVal });
   };
@@ -143,504 +173,518 @@ export const RandomizePanel: React.FC<RandomizePanelProps> = ({
     return variables.filter((v) => v.category === tab).length;
   };
 
+  // Open link attribute modal
+  const handleOpenLinkModal = (v: DynamicVariable) => {
+    setLinkingVar(v);
+    if (v.linkedTo) {
+      setSelectedTargetLayerId(v.linkedTo.targetLayerId);
+      setSelectedTargetVarId(v.linkedTo.targetVarId);
+      setLinkMultiplier(v.linkedTo.multiplier ?? 1.0);
+    } else {
+      const defaultTarget = otherLayers[0];
+      if (defaultTarget) {
+        setSelectedTargetLayerId(defaultTarget.id);
+        const matchingVar = defaultTarget.variables.find((tv) => tv.key === v.key || tv.type === v.type);
+        setSelectedTargetVarId(matchingVar?.id || defaultTarget.variables[0]?.id || '');
+      }
+      setLinkMultiplier(1.0);
+    }
+  };
+
+  const handleApplyLink = () => {
+    if (!linkingVar || !selectedTargetLayerId || !selectedTargetVarId) return;
+    onUpdateVariable(linkingVar.id, {
+      linkedTo: {
+        targetLayerId: selectedTargetLayerId,
+        targetVarId: selectedTargetVarId,
+        multiplier: linkMultiplier,
+      },
+    });
+
+    // Also sync initial value from target
+    const targetLayer = allLayers.find((l) => l.id === selectedTargetLayerId);
+    const targetVar = targetLayer?.variables.find((tv) => tv.id === selectedTargetVarId);
+    if (targetVar) {
+      let val = targetVar.value;
+      if (typeof val === 'number') {
+        val = Number((val * linkMultiplier).toFixed(2));
+      }
+      onUpdateVariable(linkingVar.id, { value: val });
+    }
+
+    setLinkingVar(null);
+  };
+
+  const handleUnlink = (varId: string) => {
+    onUpdateVariable(varId, { linkedTo: undefined });
+  };
+
+  // Find linked target info for a variable
+  const getLinkedTargetInfo = (link?: AttributeLink) => {
+    if (!link) return null;
+    const targetLayer = allLayers.find((l) => l.id === link.targetLayerId);
+    const targetVar = targetLayer?.variables.find((v) => v.id === link.targetVarId);
+    return {
+      layerName: targetLayer?.name || 'Other Layer',
+      varName: targetVar?.name || 'Attribute',
+      multiplier: link.multiplier,
+    };
+  };
+
   return (
     <div
       id="randomize-control-panel"
       className="flex flex-col h-full bg-white border border-zinc-200/90 rounded-2xl shadow-xs overflow-hidden text-zinc-900"
     >
-      {/* Header: Layer Context + Master Randomize */}
-      <div className="p-3 border-b border-zinc-200/80 bg-zinc-50/50">
-        {/* Layer Context Banner */}
-        <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-zinc-200/60">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="w-2 h-2 rounded-full bg-zinc-900"></span>
-            <span className="text-3xs text-zinc-500 uppercase tracking-wider font-semibold">
-              Layer:
-            </span>
-            <span className="text-xs font-bold text-zinc-900 truncate" title={activeLayerName}>
-              {activeLayerName}
-            </span>
-
-            {activeLayerIsLocked && (
-              <span className="px-1.5 py-0.2 rounded text-4xs font-semibold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5">
-                <Lock className="w-2.5 h-2.5" />
-                <span>Locked In</span>
-              </span>
-            )}
-
-            {!activeLayerRandomizeEnabled && (
-              <span className="px-1.5 py-0.2 rounded text-4xs font-mono bg-zinc-100 text-zinc-500 border border-zinc-200">
-                Randomize: OFF
-              </span>
-            )}
-          </div>
-
-          {onOpenLayersDrawer && (
-            <button
-              onClick={onOpenLayersDrawer}
-              className="flex items-center gap-1 text-3xs font-medium text-zinc-600 hover:text-zinc-900 bg-white hover:bg-zinc-100 px-2 py-0.5 rounded border border-zinc-250 transition-colors shadow-2xs shrink-0"
-              title="Open slide-out Layers Drawer"
-            >
-              <Layers className="w-3 h-3 text-zinc-700" />
-              <span>Layers ({totalLayersCount})</span>
-              <ChevronRight className="w-2.5 h-2.5" />
-            </button>
-          )}
-        </div>
-
-        {/* Master Randomize Button */}
-        <button
-          id="btn-master-randomize"
-          onClick={onRandomizeAll}
-          disabled={isRandomizing || (unlockedCount === 0 && !activeLayerIsLocked)}
-          className={`w-full py-2 px-3.5 rounded-xl flex items-center justify-between text-xs font-semibold tracking-wide transition-all shadow-xs ${
-            activeLayerIsLocked
-              ? 'bg-amber-50 text-amber-800 border border-amber-300 cursor-not-allowed'
-              : unlockedCount === 0
-              ? 'bg-zinc-100 text-zinc-400 border border-zinc-200 cursor-not-allowed'
-              : isRandomizing
-              ? 'bg-zinc-800 text-white scale-[0.99]'
-              : 'bg-zinc-900 hover:bg-black text-white hover:shadow-md'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Dice5
-              className={`w-4 h-4 text-zinc-300 ${isRandomizing ? 'animate-spin' : ''}`}
-            />
-            <span>
-              {activeLayerIsLocked
-                ? 'Layer Locked In'
-                : 'Randomize Parameters'}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="text-3xs font-normal text-zinc-300 bg-zinc-800/80 px-2 py-0.5 rounded-md border border-zinc-700">
-              {unlockedCount} unlocked
-            </span>
-            <kbd className="hidden sm:inline-block px-1.5 py-0.5 rounded text-4xs font-mono bg-zinc-800 text-zinc-400 border border-zinc-700">
-              Space
-            </kbd>
-          </div>
-        </button>
-
-        {/* Intensity Variance & Lock Tools */}
-        <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-zinc-200/60">
-          <div className="flex items-center gap-1">
-            <span className="text-4xs uppercase tracking-wider text-zinc-500 font-medium">
-              Variance:
-            </span>
-            <div className="flex bg-zinc-100 p-0.5 rounded-md border border-zinc-200/80">
-              {(['gentle', 'balanced', 'wild'] as RandomizeIntensity[]).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => onChangeIntensity(mode)}
-                  className={`px-1.5 py-0.2 rounded text-3xs font-medium capitalize transition-all ${
-                    intensity === mode
-                      ? 'bg-white text-zinc-900 shadow-2xs font-semibold'
-                      : 'text-zinc-500 hover:text-zinc-800'
-                  }`}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick Lock Toggles */}
-          <div className="flex items-center gap-1 text-3xs">
-            <button
-              onClick={() => onLockAll(false)}
-              className="px-1.5 py-0.5 rounded text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 transition-colors"
-              title="Unlock all variables"
-            >
-              Unlock All
-            </button>
-            <span className="text-zinc-300">|</span>
-            <button
-              onClick={() => onLockAll(true)}
-              className="px-1.5 py-0.5 rounded text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 transition-colors"
-              title="Lock all variables"
-            >
-              Lock All
-            </button>
-            <span className="text-zinc-300">|</span>
-            <button
-              onClick={onInvertLocks}
-              className="px-1.5 py-0.5 rounded text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 transition-colors"
-              title="Invert lock states"
-            >
-              Invert
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs: Physics | Function | Look | Behavior | All (Designed to minimize scrolling) */}
-      <div className="px-3 py-1.5 border-b border-zinc-200/80 bg-zinc-50/70 flex items-center justify-between gap-1">
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5 flex-1">
-          {(['physics', 'function', 'look', 'behavior'] as const).map((tab) => {
-            const config = TAB_CONFIG[tab];
-            const count = getTabCount(tab);
-            const isTabActive = activeTab === tab;
+      {/* VERY TOP: Big, prominent, color-coded tabs */}
+      <div className="p-2 border-b border-zinc-200/90 bg-zinc-50/70">
+        <div className="grid grid-cols-5 gap-1.5">
+          {(['physics', 'function', 'look', 'behavior'] as const).map((cat) => {
+            const config = TAB_CONFIG[cat];
+            const Icon = config.icon;
+            const isSelected = activeTab === cat;
+            const count = getTabCount(cat);
 
             return (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-all border ${
-                  isTabActive
-                    ? 'bg-zinc-900 text-white border-zinc-900 font-semibold shadow-2xs'
-                    : 'bg-white hover:bg-zinc-100 text-zinc-600 border-zinc-200'
+                key={cat}
+                onClick={() => setActiveTab(cat)}
+                className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl font-bold transition-all ${
+                  isSelected
+                    ? config.bgActive
+                    : 'bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200/90'
                 }`}
               >
+                <div className="flex items-center gap-1">
+                  <Icon className="w-3.5 h-3.5" />
+                  <span className="text-xs tracking-tight capitalize">{config.label}</span>
+                </div>
                 <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    isTabActive ? 'bg-white' : config.dot
-                  }`}
-                ></span>
-                <span>{config.label}</span>
-                <span
-                  className={`text-3xs font-mono ${
-                    isTabActive ? 'text-zinc-300' : 'text-zinc-400'
+                  className={`text-4xs mt-0.5 px-1.5 py-0.2 rounded-full font-mono ${
+                    isSelected
+                      ? 'bg-white/20 text-white'
+                      : 'bg-zinc-100 text-zinc-600'
                   }`}
                 >
-                  ({count})
+                  {count}
                 </span>
               </button>
             );
           })}
 
-          {/* All Tab */}
+          {/* "All" Tab */}
           <button
             onClick={() => setActiveTab('all')}
-            className={`px-2 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all border ${
+            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl font-bold transition-all ${
               activeTab === 'all'
-                ? 'bg-zinc-900 text-white border-zinc-900 font-semibold shadow-2xs'
-                : 'bg-white hover:bg-zinc-100 text-zinc-600 border-zinc-200'
+                ? 'bg-zinc-900 text-white shadow-md'
+                : 'bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200/90'
             }`}
           >
-            All ({variables.length})
-          </button>
-        </div>
-
-        {/* View Column Toggle & Add */}
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => setIsTwoColumn((prev) => !prev)}
-            className={`p-1 rounded-md border text-3xs transition-all ${
-              isTwoColumn
-                ? 'bg-zinc-900 text-white border-zinc-900'
-                : 'bg-white text-zinc-600 hover:text-zinc-900 border-zinc-200'
-            }`}
-            title={isTwoColumn ? 'Switch to 1-column view' : 'Switch to compact 2-column view'}
-          >
-            {isTwoColumn ? <Columns2 className="w-3.5 h-3.5" /> : <Rows3 className="w-3.5 h-3.5" />}
-          </button>
-
-          <button
-            id="btn-add-variable"
-            onClick={() =>
-              onAddVariableClick(
-                activeTab === 'all' ? 'physics' : (activeTab as ParameterCategory)
-              )
-            }
-            disabled={isMaxReached}
-            className={`p-1 rounded-md border transition-colors ${
-              isMaxReached
-                ? 'bg-zinc-100 text-zinc-400 border-zinc-200 cursor-not-allowed'
-                : 'bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-300 hover:text-zinc-900'
-            }`}
-            title={isMaxReached ? 'Max 20 variables reached' : 'Add custom variable'}
-          >
-            <Plus className="w-3.5 h-3.5" />
+            <span className="text-xs tracking-tight">All Tabs</span>
+            <span
+              className={`text-4xs mt-0.5 px-1.5 py-0.2 rounded-full font-mono ${
+                activeTab === 'all'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-zinc-100 text-zinc-600'
+              }`}
+            >
+              {variables.length}
+            </span>
           </button>
         </div>
       </div>
 
-      {/* Tab Context Action Bar: Randomize Active Category & Search */}
-      <div className="px-3 py-1.5 border-b border-zinc-200/60 bg-white flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          {activeTab !== 'all' ? (
+      {/* Sub-Header: Active Tab Controls + Coral Orange Add Button */}
+      <div className="px-3.5 py-2 border-b border-zinc-200/80 bg-white flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {/* Quick Category Randomize */}
+          {activeTab !== 'all' && (
             <button
               onClick={() => onRandomizeCategory(activeTab as ParameterCategory)}
               disabled={activeLayerIsLocked}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-3xs font-semibold bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-250 transition-colors"
-              title={`Randomize unlocked variables in ${activeTab}`}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-3xs font-semibold bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-250 transition-colors shadow-2xs"
+              title={`Randomize ${activeTab} variables`}
             >
-              <Dice5 className="w-3 h-3 text-zinc-700" />
-              <span>Randomize {TAB_CONFIG[activeTab as keyof typeof TAB_CONFIG]?.label}</span>
+              <Dice5 className="w-3 h-3 text-zinc-600" />
+              <span>Randomize {activeTab}</span>
             </button>
-          ) : (
-            <span className="text-3xs text-zinc-500 font-mono">
-              Showing all {variables.length} parameters
-            </span>
           )}
 
-          {lockedCount > 0 && (
-            <button
-              onClick={() => setShowLockedOnly((prev) => !prev)}
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-3xs font-medium border ${
-                showLockedOnly
-                  ? 'bg-amber-100 border-amber-300 text-amber-900'
-                  : 'bg-amber-50/70 border-amber-200 text-amber-800'
-              }`}
-            >
-              <Lock className="w-2.5 h-2.5 text-amber-600" />
-              <span>{lockedCount} Locked</span>
-            </button>
-          )}
+          {/* Lock/Unlock All Toggle */}
+          <button
+            onClick={() => onLockAll(lockedCount < variables.length)}
+            disabled={activeLayerIsLocked}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-3xs font-medium text-zinc-600 hover:text-zinc-900 bg-white hover:bg-zinc-50 border border-zinc-250 transition-colors"
+            title={lockedCount < variables.length ? 'Lock all variables' : 'Unlock all variables'}
+          >
+            {lockedCount < variables.length ? (
+              <>
+                <Lock className="w-3 h-3 text-zinc-500" />
+                <span className="hidden sm:inline">Lock All</span>
+              </>
+            ) : (
+              <>
+                <Unlock className="w-3 h-3 text-amber-600" />
+                <span className="hidden sm:inline">Unlock All</span>
+              </>
+            )}
+          </button>
+
+          {/* Column Layout Switcher */}
+          <button
+            onClick={() => setIsTwoColumn(!isTwoColumn)}
+            className="p-1 rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-250 transition-colors"
+            title={isTwoColumn ? 'Switch to single column' : 'Switch to two columns'}
+          >
+            {isTwoColumn ? <Rows3 className="w-3.5 h-3.5" /> : <Columns2 className="w-3.5 h-3.5" />}
+          </button>
         </div>
 
-        {/* Compact Search */}
-        <div className="relative w-36 sm:w-44">
-          <Search className="w-3 h-3 text-zinc-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-6 pr-4 py-0.5 text-3xs rounded bg-zinc-50 border border-zinc-250 text-zinc-800 placeholder-zinc-400 focus:outline-hidden focus:border-zinc-500"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-3xs text-zinc-400 hover:text-zinc-600"
-            >
-              ×
-            </button>
-          )}
-        </div>
+        {/* Prominent Coral Orange Add Parameter Button */}
+        <button
+          id="btn-add-parameter"
+          onClick={() =>
+            onAddVariableClick(activeTab !== 'all' ? (activeTab as ParameterCategory) : undefined)
+          }
+          disabled={isMaxReached || activeLayerIsLocked}
+          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs tracking-wide transition-all shadow-md ${
+            isMaxReached || activeLayerIsLocked
+              ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
+              : 'bg-[#ff6b4a] hover:bg-[#fa5a35] text-white shadow-[#ff6b4a]/20 hover:scale-[1.02]'
+          }`}
+          title="Add a custom dynamic parameter (Max 20)"
+        >
+          <Plus className="w-4 h-4 stroke-[2.5]" />
+          <span>+ Add Parameter</span>
+        </button>
       </div>
 
-      {/* Variables List: Compact Thinner Cards (Minimized Scrolling) */}
-      <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+      {/* Expanded Variables List */}
+      <div className="flex-1 overflow-y-auto p-3 bg-zinc-50/40">
         {filteredVariables.length === 0 ? (
-          <div className="text-center py-8 px-4 text-zinc-400 text-xs">
-            <Sliders className="w-7 h-7 mx-auto mb-1.5 text-zinc-300" />
-            <p>No variables found in this tab.</p>
+          <div className="h-48 flex flex-col items-center justify-center text-center p-4 border border-dashed border-zinc-200 rounded-xl bg-white">
+            <Sparkles className="w-6 h-6 text-zinc-300 mb-2" />
+            <p className="text-xs font-semibold text-zinc-700">No parameters in this tab</p>
+            <p className="text-3xs text-zinc-400 mt-1 max-w-xs">
+              Click the coral orange "+ Add Parameter" button above to add custom dynamic controls.
+            </p>
           </div>
         ) : (
           <div
-            className={`grid gap-2 ${
+            className={`grid gap-2.5 ${
               isTwoColumn ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'
             }`}
           >
-            {filteredVariables.map((v) => (
-              <ThinnerVariableCard
-                key={v.id}
-                variable={v}
-                onUpdate={(updates) => onUpdateVariable(v.id, updates)}
-                onRandomize={() => handleRandomizeSingle(v)}
-                onRemove={v.isCustom ? () => onRemoveVariable(v.id) : undefined}
-                disabled={activeLayerIsLocked}
-              />
-            ))}
+            {filteredVariables.map((v) => {
+              const categoryConfig = TAB_CONFIG[v.category as keyof typeof TAB_CONFIG];
+              const isLocked = v.isLocked || activeLayerIsLocked;
+              const linkedInfo = getLinkedTargetInfo(v.linkedTo);
+
+              return (
+                <div
+                  key={v.id}
+                  className={`relative p-2.5 rounded-xl border transition-all ${
+                    isLocked
+                      ? 'bg-amber-50/40 border-amber-200'
+                      : v.linkedTo
+                      ? 'bg-sky-50/40 border-sky-200 ring-1 ring-sky-300/40'
+                      : 'bg-white border-zinc-200/90 hover:border-zinc-300 shadow-2xs'
+                  }`}
+                >
+                  {/* Top Row: Name, Lock & Attribute Link Button */}
+                  <div className="flex items-center justify-between gap-1 mb-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          categoryConfig?.dot || 'bg-zinc-400'
+                        }`}
+                      />
+                      <span
+                        className="text-xs font-bold text-zinc-900 truncate"
+                        title={`${v.name} (${v.key})`}
+                      >
+                        {v.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {/* Tie Attribute / Link Button */}
+                      {otherLayers.length > 0 && (
+                        <button
+                          onClick={() => handleOpenLinkModal(v)}
+                          className={`p-1 rounded-md transition-colors ${
+                            v.linkedTo
+                              ? 'text-sky-600 bg-sky-100 hover:bg-sky-200'
+                              : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100'
+                          }`}
+                          title={
+                            v.linkedTo
+                              ? `Tied to ${linkedInfo?.layerName} • ${linkedInfo?.varName}`
+                              : 'Tie this attribute to another layer'
+                          }
+                        >
+                          <Link2 className="w-3 h-3" />
+                        </button>
+                      )}
+
+                      {/* Randomize Single Variable Button */}
+                      {!isLocked && !v.linkedTo && (
+                        <button
+                          onClick={() => handleRandomizeSingle(v)}
+                          className="p-1 rounded-md text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100 transition-colors"
+                          title="Randomize single value"
+                        >
+                          <Dice5 className="w-3 h-3" />
+                        </button>
+                      )}
+
+                      {/* Lock Toggle */}
+                      <button
+                        onClick={() => onUpdateVariable(v.id, { isLocked: !v.isLocked })}
+                        disabled={activeLayerIsLocked}
+                        className={`p-1 rounded-md transition-colors ${
+                          v.isLocked
+                            ? 'text-amber-600 bg-amber-100 hover:bg-amber-200'
+                            : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100'
+                        }`}
+                        title={v.isLocked ? 'Unlock parameter' : 'Lock in parameter'}
+                      >
+                        {v.isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                      </button>
+
+                      {/* Custom Delete */}
+                      {v.isCustom && (
+                        <button
+                          onClick={() => onRemoveVariable(v.id)}
+                          className="p-1 rounded-md text-zinc-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          title="Delete custom parameter"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tied Attribute Indicator Pill */}
+                  {v.linkedTo && linkedInfo && (
+                    <div className="mb-2 px-2 py-0.5 rounded-lg bg-sky-100/80 border border-sky-200 flex items-center justify-between text-4xs font-mono text-sky-800">
+                      <span className="truncate flex items-center gap-1">
+                        <Link2 className="w-2.5 h-2.5 text-sky-600 shrink-0" />
+                        <span className="truncate">
+                          Tied to: <strong>{linkedInfo.layerName}</strong> • {linkedInfo.varName}
+                          {linkedInfo.multiplier && linkedInfo.multiplier !== 1 ? ` (×${linkedInfo.multiplier})` : ''}
+                        </span>
+                      </span>
+                      <button
+                        onClick={() => handleUnlink(v.id)}
+                        className="p-0.5 text-sky-600 hover:text-red-600 ml-1 shrink-0"
+                        title="Unlink attribute"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Slider or Color Control */}
+                  {v.type === 'number' && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-3xs font-mono text-zinc-600">
+                        <span className="text-4xs text-zinc-400">
+                          {v.min ?? 0}
+                        </span>
+                        <span className="font-bold text-zinc-900">
+                          {v.value}
+                          {v.unit || ''}
+                        </span>
+                        <span className="text-4xs text-zinc-400">
+                          {v.max ?? 100}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={v.min ?? 0}
+                        max={v.max ?? 100}
+                        step={v.step ?? 1}
+                        value={Number(v.value)}
+                        disabled={isLocked || !!v.linkedTo}
+                        onChange={(e) =>
+                          onUpdateVariable(v.id, { value: parseFloat(e.target.value) })
+                        }
+                        className="w-full h-1.5 bg-zinc-200 rounded-lg appearance-none cursor-pointer accent-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                      />
+                    </div>
+                  )}
+
+                  {v.type === 'color' && (
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <input
+                        type="color"
+                        value={String(v.value)}
+                        disabled={isLocked || !!v.linkedTo}
+                        onChange={(e) => onUpdateVariable(v.id, { value: e.target.value })}
+                        className="w-7 h-7 rounded-lg border border-zinc-200 p-0.5 cursor-pointer disabled:opacity-40"
+                      />
+                      <span className="text-xs font-mono font-medium text-zinc-700">
+                        {String(v.value).toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+
+                  {v.type === 'boolean' && (
+                    <div className="flex items-center justify-between pt-0.5">
+                      <span className="text-3xs font-medium text-zinc-600">Toggle State</span>
+                      <button
+                        onClick={() => onUpdateVariable(v.id, { value: !v.value })}
+                        disabled={isLocked || !!v.linkedTo}
+                        className={`px-2 py-0.5 rounded text-3xs font-semibold border transition-all ${
+                          v.value
+                            ? 'bg-zinc-900 text-white border-zinc-900'
+                            : 'bg-zinc-100 text-zinc-500 border-zinc-200'
+                        }`}
+                      >
+                        {v.value ? 'Enabled' : 'Disabled'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Bottom Status Bar */}
-      <div className="px-3 py-1.5 border-t border-zinc-200/60 bg-zinc-50/70 text-4xs text-zinc-500 flex items-center justify-between">
-        <span className="font-mono">
-          {filteredVariables.length} visible • {variables.length}/20 max
-        </span>
-        <span>Click tab above to switch categories</span>
-      </div>
-    </div>
-  );
-};
-
-// ==========================================
-// THINNER, COMPACT VARIABLE CARD COMPONENT
-// ==========================================
-interface ThinnerVariableCardProps {
-  variable: DynamicVariable;
-  onUpdate: (updates: Partial<DynamicVariable>) => void;
-  onRandomize: () => void;
-  onRemove?: () => void;
-  disabled?: boolean;
-}
-
-const ThinnerVariableCard: React.FC<ThinnerVariableCardProps> = ({
-  variable: v,
-  onUpdate,
-  onRandomize,
-  onRemove,
-  disabled = false,
-}) => {
-  const isLocked = v.isLocked || disabled;
-
-  return (
-    <div
-      id={`var-card-${v.key}`}
-      className={`group relative rounded-xl border p-2 transition-all shadow-2xs ${
-        isLocked
-          ? 'bg-amber-50/40 border-amber-300 ring-1 ring-amber-300/30'
-          : 'bg-white hover:bg-zinc-50/60 border-zinc-200/90 hover:border-zinc-300'
-      }`}
-    >
-      {/* Top Row: Title, Value / Swatch, Single Dice, Lock Button */}
-      <div className="flex items-center justify-between gap-1 mb-1">
-        <div className="flex items-center gap-1 min-w-0 pr-1">
-          <span
-            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-              v.category === 'physics'
-                ? 'bg-sky-500'
-                : v.category === 'function'
-                ? 'bg-violet-500'
-                : v.category === 'look'
-                ? 'bg-rose-500'
-                : 'bg-emerald-500'
-            }`}
-          ></span>
-          <span
-            className="text-xs font-semibold text-zinc-900 truncate"
-            title={`${v.name} (${v.key})${v.description ? ` - ${v.description}` : ''}`}
-          >
-            {v.name}
-          </span>
-          {v.isCustom && (
-            <span className="px-1 py-0.2 rounded text-4xs uppercase bg-zinc-100 text-zinc-500 border border-zinc-200">
-              custom
-            </span>
-          )}
-        </div>
-
-        {/* Right Tools: Value Chip, Dice Randomize, Lock Toggle */}
-        <div className="flex items-center gap-1 shrink-0">
-          {/* Current Value Display */}
-          {v.type === 'number' && (
-            <span className="text-3xs font-mono font-medium text-zinc-700 bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200">
-              {typeof v.value === 'number'
-                ? v.value % 1 === 0
-                  ? v.value
-                  : Number(v.value).toFixed(2)
-                : v.value}
-              {v.unit || ''}
-            </span>
-          )}
-
-          {v.type === 'color' && (
-            <div className="flex items-center gap-1 bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200">
-              <span
-                className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0"
-                style={{ backgroundColor: String(v.value) }}
-              ></span>
-              <span className="text-4xs font-mono text-zinc-600 uppercase">
-                {String(v.value)}
-              </span>
+      {/* Attribute Linking Modal / Popover */}
+      {linkingVar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-zinc-200 shadow-2xl w-full max-w-md p-5 space-y-4 text-zinc-900">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-sky-500 text-white">
+                  <Link2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">Tie Attribute Across Layers</h3>
+                  <p className="text-4xs text-zinc-500">
+                    Sync "{linkingVar.name}" with an attribute in another layer
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setLinkingVar(null)}
+                className="p-1 text-zinc-400 hover:text-zinc-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          )}
 
-          {/* Single Randomize Dice Button */}
-          <button
-            onClick={onRandomize}
-            disabled={isLocked}
-            className={`p-1 rounded transition-colors ${
-              isLocked
-                ? 'text-zinc-300 cursor-not-allowed'
-                : 'text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100'
-            }`}
-            title={isLocked ? 'Parameter is locked constant' : `Randomize ${v.name}`}
-          >
-            <Dice5 className="w-3.5 h-3.5" />
-          </button>
+            {otherLayers.length === 0 ? (
+              <div className="p-4 bg-zinc-50 rounded-xl text-center text-xs text-zinc-500">
+                You only have 1 layer. Add another layer in the Layers Drawer to tie attributes!
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                    Select Target Layer
+                  </label>
+                  <select
+                    value={selectedTargetLayerId}
+                    onChange={(e) => {
+                      setSelectedTargetLayerId(e.target.value);
+                      const target = allLayers.find((l) => l.id === e.target.value);
+                      if (target && target.variables[0]) {
+                        setSelectedTargetVarId(target.variables[0].id);
+                      }
+                    }}
+                    className="w-full px-3 py-1.5 rounded-xl border border-zinc-300 text-xs bg-white text-zinc-900 focus:outline-hidden"
+                  >
+                    {otherLayers.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          {/* Parameter Lock Button */}
-          <button
-            onClick={() => onUpdate({ isLocked: !v.isLocked })}
-            disabled={disabled}
-            className={`p-1 rounded transition-all ${
-              v.isLocked
-                ? 'text-amber-700 bg-amber-100 border border-amber-300'
-                : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 border border-transparent'
-            }`}
-            title={v.isLocked ? 'Click to unlock setting' : 'Click to lock in constant value'}
-          >
-            {v.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-          </button>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                    Select Target Attribute to Tie With
+                  </label>
+                  <select
+                    value={selectedTargetVarId}
+                    onChange={(e) => setSelectedTargetVarId(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-xl border border-zinc-300 text-xs bg-white text-zinc-900 focus:outline-hidden"
+                  >
+                    {targetLayerVars.map((tv) => (
+                      <option key={tv.id} value={tv.id}>
+                        {tv.name} ({tv.category} • {tv.type})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          {/* Remove button if custom */}
-          {onRemove && (
-            <button
-              onClick={onRemove}
-              className="p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-              title="Remove custom variable"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          )}
+                {linkingVar.type === 'number' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                      Multiplier / Ratio: <span className="text-sky-600 font-bold">{linkMultiplier}×</span>
+                    </label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[0.5, 1.0, 1.5, 2.0].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setLinkMultiplier(m)}
+                          className={`py-1 rounded-lg text-xs font-mono font-medium border transition-colors ${
+                            linkMultiplier === m
+                              ? 'bg-sky-500 text-white border-sky-500 font-bold'
+                              : 'bg-zinc-50 text-zinc-700 border-zinc-200 hover:bg-zinc-100'
+                          }`}
+                        >
+                          {m}×
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 flex items-center justify-between border-t border-zinc-100">
+                  {linkingVar.linkedTo && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleUnlink(linkingVar.id);
+                        setLinkingVar(null);
+                      }}
+                      className="text-xs text-red-600 hover:underline flex items-center gap-1"
+                    >
+                      <Unlink className="w-3.5 h-3.5" />
+                      <span>Unlink</span>
+                    </button>
+                  )}
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => setLinkingVar(null)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-medium border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleApplyLink}
+                      className="px-4 py-1.5 rounded-xl text-xs font-bold bg-sky-500 hover:bg-sky-600 text-white shadow-xs flex items-center gap-1"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Tie Attribute</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-
-      {/* Bottom Row: Slender Input Controls */}
-      <div className="mt-1">
-        {/* NUMBER SLIDER */}
-        {v.type === 'number' && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-4xs font-mono text-zinc-400 shrink-0">{v.min}</span>
-            <input
-              type="range"
-              min={v.min ?? 0}
-              max={v.max ?? 100}
-              step={v.step ?? 1}
-              value={Number(v.value)}
-              disabled={disabled}
-              onChange={(e) => onUpdate({ value: parseFloat(e.target.value) })}
-              className="w-full h-1 bg-zinc-200 rounded-lg appearance-none cursor-pointer accent-zinc-900"
-            />
-            <span className="text-4xs font-mono text-zinc-400 shrink-0">{v.max}</span>
-          </div>
-        )}
-
-        {/* COLOR PICKER */}
-        {v.type === 'color' && (
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={String(v.value)}
-              disabled={disabled}
-              onChange={(e) => onUpdate({ value: e.target.value })}
-              className="w-full h-6 rounded cursor-pointer border border-zinc-250 bg-transparent p-0.5"
-            />
-          </div>
-        )}
-
-        {/* SELECT DROPDOWN */}
-        {v.type === 'select' && (
-          <select
-            value={String(v.value)}
-            disabled={disabled}
-            onChange={(e) => onUpdate({ value: e.target.value })}
-            className="w-full py-1 px-2 rounded-md bg-zinc-50 border border-zinc-250 text-3xs text-zinc-800 cursor-pointer focus:outline-hidden focus:border-zinc-500"
-          >
-            {v.options?.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        )}
-
-        {/* BOOLEAN TOGGLE */}
-        {v.type === 'boolean' && (
-          <button
-            onClick={() => onUpdate({ value: !v.value })}
-            disabled={disabled}
-            className={`w-full py-0.5 px-2 rounded-md text-3xs font-medium flex items-center justify-between border transition-all ${
-              v.value
-                ? 'bg-zinc-900 text-white border-zinc-900'
-                : 'bg-zinc-50 text-zinc-600 border-zinc-250'
-            }`}
-          >
-            <span>{v.value ? 'Enabled' : 'Disabled'}</span>
-            <span
-              className={`w-2 h-2 rounded-full ${v.value ? 'bg-emerald-400' : 'bg-zinc-300'}`}
-            ></span>
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 };
